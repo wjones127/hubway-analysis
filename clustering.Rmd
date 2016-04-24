@@ -119,5 +119,5 @@ qmap(location = "boston", zoom = 12) +
   geom_point(aes(x = lng, y = lat, color = cluster), data = stations)
 
 
-save(file="data/stations_clustered.RData", stations)
+save(file="data/stations_clustered.RData", stations, compress = TRUE)
 ```
