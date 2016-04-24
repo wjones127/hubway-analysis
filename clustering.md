@@ -17,9 +17,8 @@ trips <- fread("data/hubway_trips.csv", header = T, sep = ',')
 
 ```
 ## 
-Read 34.8% of 1579025 rows
-Read 93.7% of 1579025 rows
-Read 1579025 rows and 13 (of 13) columns from 0.146 GB file in 00:00:04
+Read 41.8% of 1579025 rows
+Read 1579025 rows and 13 (of 13) columns from 0.146 GB file in 00:00:03
 ```
 
 ```r
@@ -170,5 +169,5 @@ qmap(location = "boston", zoom = 12) +
 ![](clustering_files/figure-html/results-4.png)
 
 ```r
-save(file="data/stations_clustered.RData", stations)
+save(file="data/stations_clustered.RData", stations, compress = TRUE)
 ```

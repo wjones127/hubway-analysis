@@ -8,7 +8,11 @@ sapply(packages, library, character.only = TRUE)
 stations <- read.csv("data/hubway_stations.csv", 
                      colClasses = c("numeric", "factor", "factor", "factor",
                                     "numeric", "numeric", "factor"))
-census <- read.csv("data/census.csv")
+
+census_names <- names(read.csv("data/census.csv"))
+census <- read.csv("data/census.csv", skip = 1,
+                   colClasses = c(rep("factor",55), rep("numeric",107)))
+names(census) <- census_names
 
 qmap(location = "boston", zoom = 12) + 
   geom_point(aes(x = lng, y = lat, color = status), data = stations)
