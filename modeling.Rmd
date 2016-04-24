@@ -1,0 +1,29 @@
+---
+title: "modeling"
+author: "Will Jones"
+date: "April 24, 2016"
+output: html_document
+---
+
+```{r packages}
+packages <- c("dplyr", "ggplot2", "data.table", "lubridate", "ggmap", "tree", "glmnet")
+sapply(packages, library, character.only = TRUE)
+```
+
+```{r load-data}
+load("data/stations_clustered.RData")
+```
+
+```{r filter-vars}
+stations <- select(stations, c(3, 7, 63:169, 174)) %>% data.frame() %>% tbl_df()
+```
+
+
+```{r modeling}
+stations_x <- filter(stations, complete.cases(stations)) %>%
+  select( -cluster, -station, -status) %>% as.matrix()
+stations_y <- filter(stations, complete.cases(stations))$cluster
+log_model <- glmnet(y = stations_y, x = stations_x, family = "multinomial")
+
+one_tree <- tree(cluster ~ . - station - status, data = stations)
+```
