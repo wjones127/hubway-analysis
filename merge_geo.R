@@ -10,7 +10,7 @@ stations <- read.csv("data/hubway_stations.csv",
                                     "numeric", "numeric", "factor"))
 census <- read.csv("data/census.csv")
 
-qmap(location = "boston") + 
+qmap(location = "boston", zoom = 12) + 
   geom_point(aes(x = lng, y = lat, color = status), data = stations)
 
   ogrInfo(dsn = "data/census_2010_tracts", layer = "CENSUS2010TRACTS_POLY")
