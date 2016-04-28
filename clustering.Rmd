@@ -119,6 +119,8 @@ qplot(x = 1:8, y = ss) + geom_line() +
        x = "k",
        y = "Total Within SS") + theme_bw()
 
+ggsave(file = "plots/scree.png", width = 4, height = 3)
+
 set.seed(42) # Needed to get consistent results
 clustering <-  kmeans(clustering_data, centers = 3, nstart = 40)
 pc <- prcomp(clustering_data)
@@ -133,13 +135,14 @@ stations_w_features <- cbind(stations_w_features, pc$x) %>% data.frame() %>% tbl
 levels(stations_w_features$cluster) <- c("home", "destination", "tourist hub")
 
 qplot(data = stations_w_features, x = prop_out_morning, y = prop_out_evening, color = cluster)
+ggsave(file = "plots/cluster_scatter1.png", width = 4, height = 3)
 qplot(data = stations_w_features, x = prop_in_morning, y = prop_in_evening, color = cluster)
 qplot(data = stations_w_features, x = PC1, y = PC2, color = cluster)
 
 
-qmap(location = "boston", zoom = 12) + 
+qmap(location = "boston", zoom = 12, color = "bw") + 
   geom_point(aes(x = lng, y = lat, color = cluster), data = stations_w_features)
-
+ggsave(file = "plots/cluster_map.png", width = 4, height = 3)
 
 save(file="data/stations_clustered.RData", stations_w_features, compress = TRUE)
 ```
