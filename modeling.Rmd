@@ -6,24 +6,189 @@ output: html_document
 ---
 
 ```{r packages}
-packages <- c("dplyr", "ggplot2", "data.table", "lubridate", "ggmap", "tree", "glmnet")
+packages <- c("dplyr", "ggplot2", "data.table", "lubridate", "ggmap", "tree", "randomForest","gbm", "glmnet", "broom")
 sapply(packages, library, character.only = TRUE)
 ```
 
 ```{r load-data}
 load("data/stations_clustered.RData")
+trips <- fread("data/hubway_trips.csv", header = T, sep = ',')
+#census <- fread("data/census_norm.csv", header = T, sep = ',')
 ```
 
 ```{r filter-vars}
-stations <- select(stations, c(3, 7, 63:169, 174)) %>% data.frame() %>% tbl_df()
+load("census_norm.RData")
+census <- counts
+stations <- select(stations_w_features, id, cluster) %>%
+  inner_join(census, by = c("id" = "strt_statn"))
 ```
 
 
-```{r modeling}
-stations_x <- filter(stations, complete.cases(stations)) %>%
-  select( -cluster, -station, -status) %>% as.matrix()
-stations_y <- filter(stations, complete.cases(stations))$cluster
-log_model <- glmnet(y = stations_y, x = stations_x, family = "multinomial")
+```{r tree}
+one_tree <- tree(cluster ~ . - id - Total.Population -count_start -count_end, data = stations)
+one_tree.cv <- cv.tree(one_tree, FUN = prune.misclass)
+#one_tree.cv
+one_tree.cv$size[which.min(one_tree.cv$dev)]
+one_tree.prune <- prune.misclass(one_tree, best = 5)
+plot(one_tree.prune)
+text(one_tree.prune)
+title("Pruned Classification Tree for Clustered Classes")
 
-one_tree <- tree(cluster ~ . - station - status, data = stations)
+pred.tree <- predict(one_tree.prune,type="class")
+conf.tree <- table(pred.tree,stations$cluster)
+miss.tree <- (sum(conf.tree) - sum(diag(conf.tree)))/sum(conf.tree)
+miss.tree
+
+```
+
+```{r tree cv}
+#10fold cv
+set.seed(210)
+stations$fold <- rep(1:10,length.out=nrow(stations))
+stations$fold <- sample(stations$fold)
+missc <- rep(NA,10)
+for (i in 1:10) {
+  t <- tree(cluster ~ . - id - Total.Population -count_start -count_end -fold, data = stations[stations$fold != i,])
+  t.cv <- cv.tree(t, FUN = prune.misclass)
+  t.p <- prune.misclass(t, best = (t.cv$size[which.min(t.cv$dev)]))
+  hat <- predict(t.p,newdata=stations[stations$fold == i,],type = "class")
+  conf <- table(hat,stations[stations$fold == i,]$cluster)
+  missc[i] <- (sum(conf) - sum(diag(conf)))/sum(conf)
+} 
+stations$fold <- NULL
+cv.missc <- mean(missc)
+cv.missc
+```
+
+```{r random forest}
+set.seed(210)
+model_rf <- randomForest(cluster ~ . - id - Total.Population -count_start -count_end, data = stations, mtry = 9)
+
+pred.rf.oob <- predict(model_rf,type="response")
+pred.rf <- predict(model_rf,newdata=stations,type="response")
+
+#out of bag missclassification rate
+conf.rf.oob <- table(pred.rf.oob,stations$cluster)
+miss.rf.oob <- (sum(conf.rf.oob) - sum(diag(conf.rf.oob)))/sum(conf.rf.oob)
+miss.rf.oob
+
+conf.rf <- table(pred.rf,stations$cluster)
+miss.rf <- (sum(conf.rf) - sum(diag(conf.rf)))/sum(conf.rf)
+miss.rf
+```
+
+```{r boosting}
+model_boost <- gbm(cluster ~ . - id - Total.Population -count_start -count_end, 
+                   data = stations,
+                   interaction.depth = 2,
+                   cv.folds = 10)
+
+var_imp <- summary(model_boost)[2]
+labels(var_imp)
+```
+
+
+```{r multinomial logit with penalty}
+X <- model.matrix(cluster ~ . -id -count_start - count_end - Total.Population, data = stations)[, -1]
+Y <- stations$cluster
+
+cv.lasso <- cv.glmnet(X,Y,alpha=1, family="multinomial")
+lam.l <- cv.lasso$lambda.min
+lasso <- glmnet(X,Y,alpha = 1, family="multinomial", lambda = lam.l)
+plot(lasso$beta$home)
+plot(lasso$beta$destination)
+plot(lasso$beta$`tourist hub`)
+plot(cv.lasso)
+yhat <- predict(lasso, newx = X, s = "lambda.min", type = "class")
+
+conf.mult <- table(yhat,stations$cluster)
+conf.mult
+miss.mult <- (sum(conf.mult) - sum(diag(conf.mult)))/sum(conf.mult)
+
+par(mfrow=c(1,3))
+plot(lasso$beta$home)
+plot(lasso$beta$destination)
+plot(lasso$beta$`tourist hub`)
+
+coeff.lasso <- broom::tidy(lasso)
+coeff.lasso <- dplyr::filter(coeff.lasso,estimate > 0) %>% dplyr::arrange(estimate)
+
+ggplot(coeff.lasso, aes(x=term, y = estimate, color= class)) + geom_bar(stat = "identity") + geom_text(data = subset(coeff.lasso, estimate > 50),aes(term,estimate,label=term)) + theme(axis.text.x=element_blank()) + ggtitle("Multinomial Lasso Coefficients") + theme(plot.title=element_text(hjust=0.5))
+```
+
+```{r lasso cv}
+set.seed(210)
+stations$fold <- rep(1:10,length.out=nrow(stations))
+stations$fold <- sample(stations$fold)
+missc.mult <- rep(NA,10)
+for (i in 1:10) {
+  X <- model.matrix(cluster ~ . -id -count_start - count_end - Total.Population, data = stations[stations$fold != i,])[, -1]
+  X.p <- model.matrix(cluster ~ . -id -count_start - count_end - Total.Population, data = stations[stations$fold == i,])[, -1]
+  Y <- stations[stations$fold != i,]$cluster
+  cv.lasso <- cv.glmnet(X,Y,alpha=1, family="multinomial")
+  lam.l <- cv.lasso$lambda.min
+  lasso <- glmnet(X,Y,alpha = 1, family="multinomial", lambda = lam.l)
+  hat <- predict(lasso, newx = X.p, s = "lambda.min", type = "class")
+  conf <- table(hat,stations[stations$fold == i,]$cluster)
+  missc.mult[i] <- (sum(conf) - sum(diag(conf)))/sum(conf)
+} 
+stations$fold <- NULL
+cv.missc.mult <- mean(missc.mult)
+cv.missc.mult
+```
+
+
+
+
+```{r fancy-plot-test}
+fit_stations_rf <- function(data) randomForest(cluster ~ . - id - Total.Population, data = data, importance = TRUE)
+
+get_mda <- function(model, var) {
+  importances <- model$importance[,4]
+  importances[which(names(importances) == var)]
+}
+mutate_q <- function(data, var, value) {
+  data[[var]] <- value
+  data
+}
+shuffle <- function(data, var) mutate_q(data, var, sample(data[[var]], nrow(data)))
+
+# Create actual fit
+main_fit <- fit_stations_rf(stations)
+importance(main_fit)
+
+bootstrap_importance <- function(fit, data, var, n) {
+  replicate(n, data %>% shuffle(var) %>% fit() %>% get_mda(var))
+}
+
+importance_df <- function(fit, data, vars, n = 100) {
+  output <- data.frame(variable = vars,
+                       lwr_95 = numeric(length(vars)),
+                       upr_95 = numeric(length(vars)),
+                       estimate = numeric(length(vars)))
+  
+  for (var in vars) {
+    row <- which(output$variable == var)
+    output$estimate[row] <- data %>% fit() %>% get_mda(var)
+    random_importance <- bootstrap_importance(fit, data, var, n)
+    output$lwr_95[row] <- quantile(random_importance, probs = 0.025)
+    output$upr_95[row] <- quantile(random_importance, probs = 0.975)
+  }
+  output
+}
+
+import_vars <- c("Population.Density..per.sq..mile.",
+                 "Total.Population..10.to.14.Years",
+                 "Total.Population..45.to.54.Years",
+                 "Occupied.Housing.Units..Fuel.oil..kerosene..etc.",
+                 "Total.Population..35.to.44.Years",
+                 "Vacant.Housing.Units..Other.vacant")
+stations_import <- importance_df(fit_stations_rf, stations, import_vars, n = 100)
+
+ggplot(stations_import, aes(y = variable, x = estimate)) + 
+  geom_point(size = 2, color = "red") + 
+  geom_errorbarh(aes(xmin = lwr_95, xmax = upr_95)) + 
+  theme_bw() + 
+  labs(title = "Variable Importance for Mean Decrease Accuracy",
+       x = "Estimate with 95% CI for Null Importance")
 ```

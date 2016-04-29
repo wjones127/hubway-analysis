@@ -31,7 +31,7 @@ trips <- trips %>%
          zip_code = factor(zip_code),
          strt_statn = factor(strt_statn),
          end_statn = factor(end_statn)) %>%
-  filter(!is.na(strt_statn) &
+  dplyr::filter(!is.na(strt_statn) &
            !is.na(end_statn) & 
            duration > 0)
 
